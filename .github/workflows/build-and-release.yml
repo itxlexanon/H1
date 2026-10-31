@@ -46,7 +46,7 @@ jobs:
           fi
           touch .env
 
-      - name: Build Debug APK
+      - name: Build ABI-Split Debug APKs
         run: |
           if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
@@ -63,10 +63,10 @@ jobs:
           path: app/build/test-results/testDebugUnitTest/*.xml
           if-no-files-found: ignore
 
-      - name: Upload APK Artifact
+      - name: Upload ABI-Split APKs
         uses: actions/upload-artifact@v4
         with:
-          name: Hollow-Debug-APK
+          name: Hollow-Debug-APKs-by-ABI
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
           retention-days: 14
@@ -78,6 +78,6 @@ jobs:
           artifacts: "app/build/outputs/apk/debug/*.apk"
           tag: "latest"
           name: "Hollow Latest APK Release"
-          body: "Auto-generated Hollow LSPosed Module APK for commit ${{ github.sha }}"
+          body: "Auto-generated ABI-split Hollow APKs for commit ${{ github.sha }}. Choose the APK matching your device: arm64-v8a, armeabi-v7a, x86, or x86_64."
           allowUpdates: true
           makeLatest: true

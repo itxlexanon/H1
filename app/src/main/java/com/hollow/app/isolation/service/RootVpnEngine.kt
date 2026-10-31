@@ -38,11 +38,18 @@ object RootVpnEngine {
     fun isAvailable(): Boolean = runRoot("id -u").let { it.exitCode == 0 && it.output.lineSequence().any { line -> line.trim() == "0" } }
     fun isRunning(): Boolean = runRoot("test -s '$ROOT_PID' && kill -0 \$(cat '$ROOT_PID') 2>/dev/null").exitCode == 0
 
-    fun start(context: Context, server: VpnProxyServer, options: RouteOptions): CommandResult {
+    fun start(
+        context: Context,
+        server: VpnProxyServer,
+        options: RouteOptions,
+        onProgress: (String) -> Unit = {}
+    ): CommandResult {
+        onProgress("Checking root access…")
         if (!isAvailable()) return CommandResult(127, "Root (su) is unavailable", false)
-        val binary = try { ensureXrayBinary(context) } catch (failure: Exception) {
+        val binary = try { ensureXrayBinary(context, onProgress) } catch (failure: Exception) {
             return CommandResult(1, "Could not prepare H1 Xray: ${failure.message.orEmpty()}", false)
         }
+        onProgress("Installing Xray root service…")
         val config = File(context.filesDir, "hollow-root-xray.json")
         try { config.writeText(XrayConfigBuilder.buildRoot(server, TCP_PORT, UDP_PORT, DNS_PORT)) } catch (failure: Exception) {
             return CommandResult(2, "Invalid root Xray configuration: ${failure.message.orEmpty()}", false)
@@ -184,15 +191,20 @@ object RootVpnEngine {
         """.trimIndent() else ""}
     """.trimIndent()
 
-    private fun ensureXrayBinary(context: Context): File {
+    private fun ensureXrayBinary(context: Context, onProgress: (String) -> Unit): File {
         val abi = Build.SUPPORTED_ABIS.firstOrNull { it == "arm64-v8a" || it == "x86_64" }
             ?: error("H1 root Xray currently supports arm64-v8a and x86_64")
         val spec = specFor(abi)
         val cache = File(context.filesDir, "root-xray/$XRAY_VERSION/$abi/xray")
-        if (cache.isFile && sha256(cache) == spec.sha256) return cache
+        if (cache.isFile && sha256(cache) == spec.sha256) {
+            onProgress("Using cached Xray binary")
+            return cache
+        }
         cache.parentFile?.mkdirs()
         val zipFile = File(cache.parentFile, "xray.zip")
-        download(spec.url, zipFile)
+        onProgress("Downloading Xray binary… 0%")
+        download(spec.url, zipFile, onProgress)
+        onProgress("Verifying Xray download…")
         check(sha256(zipFile) == spec.sha256) { "Xray download checksum verification failed" }
         ZipInputStream(zipFile.inputStream().buffered()).use { zip ->
             var entry = zip.nextEntry
@@ -215,9 +227,29 @@ object RootVpnEngine {
         else -> BinarySpec("https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/Xray-android-amd64.zip", "7fda59f39c06308c82c3c873590febcfd8acb2db29431eea1459d86408d44618")
     }
 
-    private fun download(url: String, destination: File) {
+    private fun download(url: String, destination: File, onProgress: (String) -> Unit) {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply { connectTimeout = 20_000; readTimeout = 60_000; requestMethod = "GET" }
-        connection.inputStream.use { input -> destination.outputStream().use { output -> input.copyTo(output) } }
+        val total = connection.contentLengthLong
+        var downloaded = 0L
+        var lastPercent = -1L
+        connection.inputStream.use { input ->
+            destination.outputStream().use { output ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    output.write(buffer, 0, count)
+                    downloaded += count
+                    if (total > 0) {
+                        val percent = (downloaded * 100 / total).coerceIn(0, 100)
+                        if (percent >= lastPercent + 5 || percent == 100L) {
+                            lastPercent = percent
+                            onProgress("Downloading Xray binary… $percent%")
+                        }
+                    }
+                }
+            }
+        }
         connection.disconnect()
     }
     private fun sha256(file: File): String = MessageDigest.getInstance("SHA-256").digest(file.readBytes()).joinToString("") { "%02x".format(it.toInt() and 0xff) }

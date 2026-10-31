@@ -61,6 +61,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -119,6 +120,7 @@ fun VpnProxyScreen(
     val settings by viewModel.settings.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
     val allApps by viewModel.allInstalledApps.collectAsState()
+    val rootVpnProgress by viewModel.rootVpnProgress.collectAsState()
 
     val isConnected = settings.vpnConnectionState == VpnConnectionState.CONNECTED
     val isConnecting = settings.vpnConnectionState == VpnConnectionState.CONNECTING
@@ -176,6 +178,36 @@ fun VpnProxyScreen(
         } else {
             vpnPermissionLauncher.launch(permissionIntent)
         }
+    }
+
+    if (isConnecting && settings.vpnEngineMode == VpnEngineMode.ROOT_XRAY_TPROXY && rootVpnProgress != null) {
+        AlertDialog(
+            onDismissRequest = {},
+            shape = RoundedCornerShape(24.dp),
+            containerColor = scheme.surface,
+            title = {
+                Text("Preparing Root VPN", fontWeight = FontWeight.Bold, fontFamily = JakartaFontFamily)
+            },
+            text = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(28.dp), strokeWidth = 3.dp)
+                    Text(
+                        text = rootVpnProgress.orEmpty(),
+                        color = scheme.onSurfaceVariant,
+                        fontSize = 13.sp,
+                        fontFamily = JakartaFontFamily
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { toggleVpn() }) {
+                    Text("Cancel", fontFamily = JakartaFontFamily)
+                }
+            }
+        )
     }
 
     // Navigation back handler

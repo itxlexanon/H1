@@ -23,7 +23,9 @@ import com.hollow.app.isolation.mount.MountEntry
 import com.hollow.app.isolation.mount.MountManager
 import com.hollow.app.isolation.pkg.InstalledAppInfo
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import android.util.Base64
 import java.net.URL
@@ -42,6 +44,8 @@ class SettingsViewModel(
     val selinuxStatus: StateFlow<String> = settingsRepository.selinuxStatus
     val statusMessage: StateFlow<String?> = settingsRepository.statusMessage
     val allInstalledApps: StateFlow<List<InstalledAppInfo>> = configRepository.allInstalledApps
+    private val _rootVpnProgress = MutableStateFlow<String?>(null)
+    val rootVpnProgress: StateFlow<String?> = _rootVpnProgress.asStateFlow()
 
     fun clearStatusMessage() {
         settingsRepository.clearStatusMessage()
@@ -66,7 +70,9 @@ class SettingsViewModel(
             settings.value.vpnConnectionState == VpnConnectionState.CONNECTING
         ) {
             viewModelScope.launch(Dispatchers.IO) {
+                _rootVpnProgress.value = "Stopping root Xray…"
                 RootVpnEngine.stop()
+                _rootVpnProgress.value = null
                 settingsRepository.updateSettings {
                     it.copy(vpnTunnelEnabled = false, vpnConnectionState = VpnConnectionState.DISCONNECTED)
                 }
@@ -76,6 +82,7 @@ class SettingsViewModel(
         }
 
         viewModelScope.launch(Dispatchers.IO) {
+            _rootVpnProgress.value = "Preparing root Xray…"
             settingsRepository.updateSettings { it.copy(vpnConnectionState = VpnConnectionState.CONNECTING) }
             if (!RootVpnEngine.isAvailable()) {
                 settingsRepository.updateSettings {
@@ -84,6 +91,7 @@ class SettingsViewModel(
                 settingsRepository.postStatusMessage(
                     "Root TProxy unavailable. Grant H1 root access and retry."
                 )
+                _rootVpnProgress.value = null
                 return@launch
             }
             val current = settings.value
@@ -94,6 +102,7 @@ class SettingsViewModel(
             if (!current.connectWholeDevice && selectedPackages.isEmpty()) {
                 settingsRepository.updateSettings { it.copy(vpnTunnelEnabled = false, vpnConnectionState = VpnConnectionState.ERROR) }
                 settingsRepository.postStatusMessage("Select apps or enable whole-device routing before starting root TProxy")
+                _rootVpnProgress.value = null
                 return@launch
             }
             val result = RootVpnEngine.start(
@@ -105,14 +114,17 @@ class SettingsViewModel(
                     ipv6Enabled = current.rootIpv6Enabled,
                     hotspotEnabled = current.rootHotspotEnabled,
                     usbEnabled = current.rootUsbEnabled
-                )
+                ),
+                onProgress = { _rootVpnProgress.value = it }
             )
             if (result.exitCode == 0 && RootVpnEngine.isRunning()) {
+                _rootVpnProgress.value = null
                 settingsRepository.updateSettings {
                     it.copy(vpnTunnelEnabled = true, vpnConnectionState = VpnConnectionState.CONNECTED)
                 }
                 settingsRepository.postStatusMessage("Root TProxy connected; Android VPN interface was not created")
             } else {
+                _rootVpnProgress.value = null
                 settingsRepository.updateSettings {
                     it.copy(vpnTunnelEnabled = false, vpnConnectionState = VpnConnectionState.ERROR)
                 }
